@@ -32,38 +32,50 @@ class OptionChainAnalyzer:
     def setup_option_frame(self):
         input_frame = ttk.Frame(self.option_frame)
         input_frame.pack(pady=10)
-
+    
         tk.Label(input_frame, text="Enter Ticker:").grid(row=0, column=0, padx=5)
         self.ticker_entry = ttk.Entry(input_frame)
         self.ticker_entry.grid(row=0, column=1, padx=5)
         tk.Label(input_frame, text="(Press Enter)").grid(row=0, column=2, padx=5)
-
+    
         self.recent_tickers_var = tk.StringVar()
         self.recent_tickers_dropdown = ttk.Combobox(input_frame, textvariable=self.recent_tickers_var, state="readonly", width=15)
         self.recent_tickers_dropdown.grid(row=0, column=3, padx=5)
         self.recent_tickers_dropdown.set("Recent Tickers")
-
+    
         tk.Label(input_frame, text="Select Expiration:").grid(row=1, column=0, padx=5, pady=5)
         self.expiry_var = tk.StringVar()
         self.expiry_dropdown = ttk.Combobox(input_frame, textvariable=self.expiry_var, state="readonly", width=15)
         self.expiry_dropdown.grid(row=1, column=1, padx=5, pady=5)
-
+    
         self.analyze_button = ttk.Button(input_frame, text="Analyze", command=self.start_analysis)
         self.analyze_button.grid(row=1, column=2, padx=5, pady=5)
-
+    
         columns = ("Type", "Strike", "Premium", "Last Price", "Bid", "Ask", "Volume", "Open Interest", "Implied Volatility")
         self.result_tree = ttk.Treeview(self.option_frame, columns=columns, show="headings")
         for col in columns:
-            self.result_tree.heading(col, text=col)
+            self.result_tree.heading(col, text=col, command=lambda _col=col: self.treeview_sort_column(self.result_tree, _col, False))
             self.result_tree.column(col, width=100)
         self.result_tree.pack(expand=True, fill="both")
-
-        self.note_label = tk.Label(self.option_frame, text="Note: Greek values are not available through this data source.", fg="red")
+    
+        self.note_label = tk.Label(self.option_frame, text="Note: Click on column headers to sort.", fg="blue")
         self.note_label.pack(pady=5)
-
+    
         self.ticker_entry.bind("<Return>", lambda event: self.fetch_expiry_dates())
         self.recent_tickers_dropdown.bind("<<ComboboxSelected>>", self.use_recent_ticker)
-
+        
+    def treeview_sort_column(self, tv, col, reverse):
+        l = [(tv.set(k, col), k) for k in tv.get_children('')]
+        try:
+            l.sort(key=lambda t: float(t[0].replace('$', '').replace('%', '')), reverse=reverse)
+        except ValueError:
+            l.sort(reverse=reverse)
+        
+        for index, (val, k) in enumerate(l):
+            tv.move(k, '', index)
+        
+        tv.heading(col, command=lambda: self.treeview_sort_column(tv, col, not reverse))
+        
     def setup_chart_frame(self):
         self.chart_fig, self.chart_ax = plt.subplots(figsize=(10, 6))
         self.chart_canvas = FigureCanvasTkAgg(self.chart_fig, master=self.chart_frame)
@@ -154,28 +166,30 @@ class OptionChainAnalyzer:
 
     def update_results(self, calls, puts, current_price):
         self.result_tree.delete(*self.result_tree.get_children())
-
+        
         self.result_tree.insert("", "end", values=("Current Price", f"${current_price:.2f}", "", "", "", "", "", "", ""), tags=('header',))
         self.result_tree.tag_configure('header', background='lightgrey')
-
+        
         for option_type, df in [("Call", calls), ("Put", puts)]:
             for _, row in df.iterrows():
+                strike = row['strike']
                 last_price = row['lastPrice']
-                premium = last_price * 100  
+                premium = last_price * 100  # Premium is the cost per contract (100 shares)
+        
                 self.result_tree.insert("", "end", values=(
                     option_type,
-                    f"${row['strike']:.2f}",
-                    f"${premium:.2f}",  
-                    f"${last_price:.2f}",  
+                    f"${strike:.2f}",
+                    f"${premium:.2f}",  # Total premium per contract
+                    f"${last_price:.2f}",  # Last traded price per share
                     f"${row['bid']:.2f}",
                     f"${row['ask']:.2f}",
                     row['volume'],
                     row['openInterest'],
                     f"{row['impliedVolatility']:.2%}"
                 ))
-
+        
         self.analyze_button.config(state="normal")
-
+        
     def get_bollinger_bands(self, data, window=20, num_std=2):
         rolling_mean = data['Close'].rolling(window=window).mean()
         rolling_std = data['Close'].rolling(window=window).std()
