@@ -166,29 +166,38 @@ class OptionChainAnalyzer:
 
     def update_results(self, calls, puts, current_price):
         self.result_tree.delete(*self.result_tree.get_children())
+    
+        calls_sorted = calls.sort_values('strike', ascending=False)
         
+        puts_sorted = puts.sort_values('strike', ascending=True)
+    
+        for _, row in calls_sorted.iterrows():
+            self.insert_option_row("Call", row, current_price)
+    
         self.result_tree.insert("", "end", values=("Current Price", f"${current_price:.2f}", "", "", "", "", "", "", ""), tags=('header',))
         self.result_tree.tag_configure('header', background='lightgrey')
-        
-        for option_type, df in [("Call", calls), ("Put", puts)]:
-            for _, row in df.iterrows():
-                strike = row['strike']
-                last_price = row['lastPrice']
-                premium = last_price * 100  # Premium is the cost per contract (100 shares)
-        
-                self.result_tree.insert("", "end", values=(
-                    option_type,
-                    f"${strike:.2f}",
-                    f"${premium:.2f}",  # Total premium per contract
-                    f"${last_price:.2f}",  # Last traded price per share
-                    f"${row['bid']:.2f}",
-                    f"${row['ask']:.2f}",
-                    row['volume'],
-                    row['openInterest'],
-                    f"{row['impliedVolatility']:.2%}"
-                ))
-        
+    
+        for _, row in puts_sorted.iterrows():
+            self.insert_option_row("Put", row, current_price)
+    
         self.analyze_button.config(state="normal")
+
+    def insert_option_row(self, option_type, row, current_price):
+        strike = row['strike']
+        last_price = row['lastPrice']
+        premium = last_price * 100  
+    
+        self.result_tree.insert("", "end", values=(
+            option_type,
+            f"${strike:.2f}",
+            f"${premium:.2f}",  
+            f"${last_price:.2f}",  
+            f"${row['bid']:.2f}",
+            f"${row['ask']:.2f}",
+            row['volume'],
+            row['openInterest'],
+            f"{row['impliedVolatility']:.2%}"
+        ))
         
     def get_bollinger_bands(self, data, window=20, num_std=2):
         rolling_mean = data['Close'].rolling(window=window).mean()
