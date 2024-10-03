@@ -13,8 +13,63 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from collections import deque
 from scipy.signal import argrelextrema
+from scipy.stats import norm
 from scipy import stats
 from statsmodels.tsa.arima.model import ARIMA
+
+def calculate_d1(S, K, T, r, sigma):
+    return (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
+
+def calculate_d2(d1, sigma, T):
+    return d1 - sigma * np.sqrt(T)
+
+def calculate_call_delta(d1):
+    return norm.cdf(d1)
+
+def calculate_put_delta(d1):
+    return -norm.cdf(-d1)
+
+def calculate_gamma(d1, S, K, T, r, sigma):
+    return norm.pdf(d1) / (S * sigma * np.sqrt(T))
+
+def calculate_vega(d1, S, K, T, r):
+    return S * norm.pdf(d1) * np.sqrt(T) / 100
+
+def calculate_theta(d1, d2, S, K, T, r, sigma, option_type):
+    if option_type == 'call':
+        theta = (-S * norm.pdf(d1) * sigma / (2 * np.sqrt(T)) - r * K * np.exp(-r * T) * norm.cdf(d2)) / 365
+    else:  # put
+        theta = (-S * norm.pdf(d1) * sigma / (2 * np.sqrt(T)) + r * K * np.exp(-r * T) * norm.cdf(-d2)) / 365
+    return theta
+
+def calculate_rho(d2, K, T, r, option_type):
+    if option_type == 'call':
+        rho = K * T * np.exp(-r * T) * norm.cdf(d2) / 100
+    else:  # put
+        rho = -K * T * np.exp(-r * T) * norm.cdf(-d2) / 100
+    return rho
+
+def calculate_greeks(S, K, T, r, sigma, option_type):
+    d1 = calculate_d1(S, K, T, r, sigma)
+    d2 = calculate_d2(d1, sigma, T)
+    
+    if option_type == 'call':
+        delta = calculate_call_delta(d1)
+    else:  # put
+        delta = calculate_put_delta(d1)
+    
+    gamma = calculate_gamma(d1, S, K, T, r, sigma)
+    vega = calculate_vega(d1, S, K, T, r)
+    theta = calculate_theta(d1, d2, S, K, T, r, sigma, option_type)
+    rho = calculate_rho(d2, K, T, r, option_type)
+    
+    return {
+        'delta': delta,
+        'gamma': gamma,
+        'vega': vega,
+        'theta': theta,
+        'rho': rho
+    }
 
 class QuantAnalyzer:
     def __init__(self):
@@ -306,7 +361,6 @@ class EnhancedOptionChainAnalyzer:
         self.fundamental_analyzer = FundamentalAnalyzer()
         self.quant_analyzer = QuantAnalyzer()
 
-
     def setup_option_frame(self):
         input_frame = ttk.Frame(self.option_frame)
         input_frame.pack(pady=10)
@@ -329,7 +383,7 @@ class EnhancedOptionChainAnalyzer:
         self.analyze_button = ttk.Button(input_frame, text="Analyze", command=self.start_analysis)
         self.analyze_button.grid(row=1, column=2, padx=5, pady=5)
     
-        columns = ("Type", "Strike", "Premium", "Last Price", "Bid", "Ask", "Volume", "Open Interest", "Implied Volatility")
+        columns = ("Type", "Strike", "Premium", "Last Price", "Bid", "Ask", "Volume", "Open Interest", "Implied Volatility", "Delta", "Gamma", "Theta", "Vega", "Rho")
         self.result_tree = ttk.Treeview(self.option_frame, columns=columns, show="headings")
         for col in columns:
             self.result_tree.heading(col, text=col, command=lambda _col=col: self.treeview_sort_column(self.result_tree, _col, False))
@@ -341,7 +395,6 @@ class EnhancedOptionChainAnalyzer:
     
         self.ticker_entry.bind("<Return>", lambda event: self.fetch_expiry_dates())
         self.recent_tickers_dropdown.bind("<<ComboboxSelected>>", self.use_recent_ticker)
-
 
     def setup_chart_frame(self):
         self.chart_fig, self.chart_ax = plt.subplots(figsize=(10, 6))
@@ -361,6 +414,10 @@ class EnhancedOptionChainAnalyzer:
         self.summary_text = tk.Text(self.summary_frame, wrap=tk.WORD, width=80, height=20)
         self.summary_text.pack(padx=10, pady=10, expand=True, fill="both")
 
+    def setup_quant_frame(self):
+        self.quant_text = tk.Text(self.quant_frame, wrap=tk.WORD, width=80, height=20)
+        self.quant_text.pack(padx=10, pady=10, expand=True, fill="both")
+
     def treeview_sort_column(self, tv, col, reverse):
         l = [(tv.set(k, col), k) for k in tv.get_children('')]
         try:
@@ -379,64 +436,6 @@ class EnhancedOptionChainAnalyzer:
             self.ticker_entry.delete(0, tk.END)
             self.ticker_entry.insert(0, selected_ticker)
             self.fetch_expiry_dates()
-            
-    def perform_astrological_analysis(self, ticker):
-        analysis = "🔮 Astrological Analysis 🔮\n\n"     
-
-        date = datetime.now()
-        
-        sun = ephem.Sun()
-        moon = ephem.Moon()
-        
-        sun.compute(date)
-        moon.compute(date)
-        
-        moon_phase = moon.phase
-        if moon_phase < 5:
-            analysis += "New Moon: A time for new beginnings. The stock may start a new trend.\n"
-        elif moon_phase < 95:
-            analysis += "Waxing Moon: Growth phase. The stock might see some gains.\n"
-        elif moon_phase < 100:
-            analysis += "Full Moon: Peak energy. Expect high volatility.\n"
-        else:
-            analysis += "Waning Moon: A time for reflection. The stock might consolidate.\n"
-        
-        sun_sign = ephem.constellation(sun)[1]
-        analysis += f"The Sun is in {sun_sign}. "
-        if sun_sign in ["Aries", "Leo", "Sagittarius"]:
-            analysis += "Fire signs suggest passion and growth. The stock might heat up!\n"
-        elif sun_sign in ["Taurus", "Virgo", "Capricorn"]:
-            analysis += "Earth signs suggest stability. The stock might show steady performance.\n"
-        elif sun_sign in ["Gemini", "Libra", "Aquarius"]:
-            analysis += "Air signs suggest communication and ideas. News might affect the stock.\n"
-        else:
-            analysis += "Water signs suggest emotion and intuition. Trust your gut feeling about this stock.\n"
-        
-        events = [
-            "Mercury is in retrograde. Communication might be tricky. Double-check your orders!",
-            "Venus aligns with Mars. Love and war collide. The stock might see a passionate battle between bulls and bears.",
-            "Jupiter's influence is strong. Expansion and growth might be on the horizon.",
-            "Saturn's rings are particularly bright. Patience may be rewarded in the long term.",
-            "Uranus is causing disruptions. Expect the unexpected with this stock!",
-            "Neptune's dreamy influence is strong. The stock's true value might be obscured.",
-            "Pluto's transformative energy is at play. A major change could be coming."
-        ]
-        analysis += random.choice(events) + "\n\n"
-        
-        change_percent = random.uniform(-5, 5)
-        direction = "rise" if change_percent > 0 else "fall"
-        analysis += f"The stars suggest the stock price may {direction} by about {abs(change_percent):.2f}% in the next lunar cycle.\n"
-        
-        advice = [
-            "Consider meditation before making any trades.",
-            "Consult your horoscope before major investment decisions.",
-            "Aligning your chakras might improve your trading performance.",
-            "Remember, the universe has a plan... but it might not be about your stock picks.",
-            "If in doubt, consult a magic 8-ball for your investment strategy."
-        ]
-        analysis += f"\nCelestial Advice: {random.choice(advice)}\n"
-        
-        return analysis
 
     def add_to_recent_tickers(self, ticker):
         if ticker in self.recent_tickers:
@@ -446,21 +445,6 @@ class EnhancedOptionChainAnalyzer:
 
     def update_recent_tickers_dropdown(self):
         self.recent_tickers_dropdown['values'] = list(self.recent_tickers)
-        
-    def calculate_support_resistance(self, data, window=20):
-        support_levels = []
-        resistance_levels = []
-        
-        for i in range(window, len(data) - window):
-            if all(data['Low'].iloc[i] <= data['Low'].iloc[i-j] for j in range(1, window+1)) and \
-            all(data['Low'].iloc[i] <= data['Low'].iloc[i+j] for j in range(1, window+1)):
-                support_levels.append((data.index[i], data['Low'].iloc[i]))
-            
-            if all(data['High'].iloc[i] >= data['High'].iloc[i-j] for j in range(1, window+1)) and \
-            all(data['High'].iloc[i] >= data['High'].iloc[i+j] for j in range(1, window+1)):
-                resistance_levels.append((data.index[i], data['High'].iloc[i]))
-        
-        return support_levels, resistance_levels
 
     def fetch_expiry_dates(self):
         ticker = self.ticker_entry.get().upper()
@@ -481,6 +465,125 @@ class EnhancedOptionChainAnalyzer:
             self.add_to_recent_tickers(ticker)
         except Exception as e:
             messagebox.showerror("Error", f"An error occurred: {str(e)}")
+
+    def calculate_option_greeks(self, row, current_price, risk_free_rate, days_to_expiry, option_type):
+        S = current_price
+        K = row['strike']
+        T = days_to_expiry / 365  # Convert days to years
+        r = risk_free_rate
+        sigma = row['impliedVolatility']
+        
+        return calculate_greeks(S, K, T, r, sigma, option_type)
+
+    def analyze_option_chain(self, ticker, expiry):
+        try:
+            stock = yf.Ticker(ticker)
+            
+            try:
+                current_price = stock.info['regularMarketPrice']
+            except KeyError:
+                hist = stock.history(period="1d")
+                if not hist.empty:
+                    current_price = hist['Close'].iloc[-1]
+                else:
+                    raise ValueError("Unable to retrieve current stock price")
+
+            chain = stock.option_chain(expiry)
+
+            calls = chain.calls
+            puts = chain.puts
+
+            all_strikes = sorted(set(calls['strike'].tolist() + puts['strike'].tolist()))
+
+            current_price_index = min(range(len(all_strikes)), key=lambda i: abs(all_strikes[i] - current_price))
+
+            call_strikes = all_strikes[current_price_index:current_price_index + 7]
+            calls = calls[calls['strike'].isin(call_strikes)]
+
+            put_strikes = all_strikes[max(0, current_price_index - 6):current_price_index + 1]
+            puts = puts[puts['strike'].isin(put_strikes)]
+
+            # Calculate days to expiry
+            expiry_date = datetime.strptime(expiry, "%Y-%m-%d")
+            days_to_expiry = (expiry_date - datetime.now()).days
+
+            # Use a constant risk-free rate (you may want to fetch this dynamically)
+            risk_free_rate = 0.02  # 2% annual rate
+
+            # Calculate Greeks for calls and puts
+            calls['greeks'] = calls.apply(lambda row: self.calculate_option_greeks(row, current_price, risk_free_rate, days_to_expiry, 'call'), axis=1)
+            puts['greeks'] = puts.apply(lambda row: self.calculate_option_greeks(row, current_price, risk_free_rate, days_to_expiry, 'put'), axis=1)
+
+            self.master.after(0, self.update_results, calls, puts, current_price)
+        except Exception as e:
+            error_message = f"An error occurred: {str(e)}\nPlease try again or check your internet connection."
+            self.master.after(0, messagebox.showerror, "Error", error_message)
+        finally:
+            self.master.after(0, lambda: self.analyze_button.config(state="normal"))
+
+    def update_results(self, calls, puts, current_price):
+        self.result_tree.delete(*self.result_tree.get_children())
+        
+        columns = ("Type", "Strike", "Premium", "Last Price", "Bid", "Ask", "Volume", "Open Interest", "Implied Volatility", "Delta", "Gamma", "Theta", "Vega", "Rho")
+        self.result_tree.config(columns=columns)
+        for col in columns:
+            self.result_tree.heading(col, text=col, command=lambda _col=col: self.treeview_sort_column(self.result_tree, _col, False))
+            self.result_tree.column(col, width=100)
+        
+        # Combine calls and puts, and sort by strike price
+        all_options = pd.concat([calls, puts])
+        all_options['Type'] = ['Call'] * len(calls) + ['Put'] * len(puts)
+        all_options_sorted = all_options.sort_values('strike', ascending=False)
+        
+        for _, row in all_options_sorted.iterrows():
+            if row['Type'] == 'Call' and row['strike'] >= current_price:
+                self.insert_option_row("Call", row, current_price)
+        
+        # Insert the current price row
+        self.result_tree.insert("", "end", values=("Current Price", f"${current_price:.2f}", "", "", "", "", "", "", "", "", "", "", "", ""), tags=('header',))
+        self.result_tree.tag_configure('header', background='lightgrey')
+        
+        for _, row in all_options_sorted.iterrows():
+            if row['Type'] == 'Put' and row['strike'] <= current_price:
+                self.insert_option_row("Put", row, current_price)
+    
+    def insert_option_row(self, option_type, row, current_price):
+        strike = row['strike']
+        last_price = row['lastPrice']
+        premium = last_price * 100
+        greeks = row['greeks']
+    
+        self.result_tree.insert("", "end", values=(
+            option_type,
+            f"${strike:.2f}",
+            f"${premium:.2f}",
+            f"${last_price:.2f}",
+            f"${row['bid']:.2f}",
+            f"${row['ask']:.2f}",
+            row['volume'],
+            row['openInterest'],
+            f"{row['impliedVolatility']:.2%}",
+            f"{greeks['delta']:.4f}",
+            f"{greeks['gamma']:.4f}",
+            f"{greeks['theta']:.4f}",
+            f"{greeks['vega']:.4f}",
+            f"{greeks['rho']:.4f}"
+        ))
+
+    def calculate_support_resistance(self, data, window=20):
+        support_levels = []
+        resistance_levels = []
+        
+        for i in range(window, len(data) - window):
+            if all(data['Low'].iloc[i] <= data['Low'].iloc[i-j] for j in range(1, window+1)) and \
+            all(data['Low'].iloc[i] <= data['Low'].iloc[i+j] for j in range(1, window+1)):
+                support_levels.append((data.index[i], data['Low'].iloc[i]))
+            
+            if all(data['High'].iloc[i] >= data['High'].iloc[i-j] for j in range(1, window+1)) and \
+            all(data['High'].iloc[i] >= data['High'].iloc[i+j] for j in range(1, window+1)):
+                resistance_levels.append((data.index[i], data['High'].iloc[i]))
+        
+        return support_levels, resistance_levels
 
     def perform_fundamental_analysis(self, ticker):
         try:
@@ -568,10 +671,6 @@ class EnhancedOptionChainAnalyzer:
             return analysis
         except Exception as e:
             return f"Error in fundamental analysis: {str(e)}\n\nPlease check if the ticker symbol is correct and try again."
-        
-    def setup_quant_frame(self):
-        self.quant_text = tk.Text(self.quant_frame, wrap=tk.WORD, width=80, height=20)
-        self.quant_text.pack(padx=10, pady=10, expand=True, fill="both")
 
     def perform_quant_analysis(self, data, ticker, expiry):
         analysis = "Quantitative Analysis:\n"
@@ -641,7 +740,6 @@ class EnhancedOptionChainAnalyzer:
         threading.Thread(target=self.update_quant_analysis, args=(ticker,), daemon=True).start()
         threading.Thread(target=self.update_comprehensive_analysis, args=(ticker, expiry), daemon=True).start()
 
-
     def update_fundamental_analysis(self, ticker):
         analysis = self.perform_fundamental_analysis(ticker)
         self.master.after(0, self.update_fundamental_text, analysis)
@@ -649,7 +747,6 @@ class EnhancedOptionChainAnalyzer:
     def update_fundamental_text(self, analysis):
         self.fundamental_text.delete(1.0, tk.END)
         self.fundamental_text.insert(tk.END, analysis)
-        print("Fundamental analysis updated with:", analysis[:100] + "...")
         
     def update_comprehensive_analysis(self, ticker, expiry):
         summary = self.generate_comprehensive_analysis(ticker, expiry)
@@ -658,110 +755,6 @@ class EnhancedOptionChainAnalyzer:
     def update_summary_text(self, summary):
         self.summary_text.delete(1.0, tk.END)
         self.summary_text.insert(tk.END, summary)
-
-
-    def analyze_option_chain(self, ticker, expiry):
-        try:
-            stock = yf.Ticker(ticker)
-            
-            try:
-                current_price = stock.info['regularMarketPrice']
-            except KeyError:
-                hist = stock.history(period="1d")
-                if not hist.empty:
-                    current_price = hist['Close'].iloc[-1]
-                else:
-                    raise ValueError("Unable to retrieve current stock price")
-
-            chain = stock.option_chain(expiry)
-
-            calls = chain.calls
-            puts = chain.puts
-
-            all_strikes = sorted(set(calls['strike'].tolist() + puts['strike'].tolist()))
-
-            current_price_index = min(range(len(all_strikes)), key=lambda i: abs(all_strikes[i] - current_price))
-
-            call_strikes = all_strikes[current_price_index:current_price_index + 7]
-            calls = calls[calls['strike'].isin(call_strikes)]
-
-            put_strikes = all_strikes[max(0, current_price_index - 6):current_price_index + 1]
-            puts = puts[puts['strike'].isin(put_strikes)]
-
-            self.master.after(0, self.update_results, calls, puts, current_price)
-        except Exception as e:
-            error_message = f"An error occurred: {str(e)}\nPlease try again or check your internet connection."
-            self.master.after(0, messagebox.showerror, "Error", error_message)
-        finally:
-            self.master.after(0, lambda: self.analyze_button.config(state="normal"))
-
-    def update_results(self, calls, puts, current_price):
-        self.result_tree.delete(*self.result_tree.get_children())
-    
-        calls_sorted = calls.sort_values('strike', ascending=False)
-        
-        for _, row in calls_sorted.iterrows():
-            self.insert_option_row("Call", row, current_price)
-    
-        self.result_tree.insert("", "end", values=("Current Price", f"${current_price:.2f}", "", "", "", "", "", "", ""), tags=('header',))
-        self.result_tree.tag_configure('header', background='lightgrey')
-    
-        puts_sorted = puts.sort_values('strike', ascending=False)
-        
-        for _, row in puts_sorted.iterrows():
-            self.insert_option_row("Put", row, current_price)
-
-    def insert_option_row(self, option_type, row, current_price):
-        strike = row['strike']
-        last_price = row['lastPrice']
-        premium = last_price * 100  
-    
-        self.result_tree.insert("", "end", values=(
-            option_type,
-            f"${strike:.2f}",
-            f"${premium:.2f}",  
-            f"${last_price:.2f}",  
-            f"${row['bid']:.2f}",
-            f"${row['ask']:.2f}",
-            row['volume'],
-            row['openInterest'],
-            f"{row['impliedVolatility']:.2%}"
-        ))
-        
-    def detect_patterns(self, data, window=20):
-        patterns = []
-        
-        local_max = argrelextrema(data['Close'].values, np.greater, order=window)[0]
-        local_min = argrelextrema(data['Close'].values, np.less, order=window)[0]
-        
-        # double top
-        if len(local_max) >= 2:
-            if abs(data['Close'].iloc[local_max[-1]] - data['Close'].iloc[local_max[-2]]) / data['Close'].iloc[local_max[-2]] < 0.03:
-                patterns.append("Double Top")
-        
-        # double bottom
-        if len(local_min) >= 2:
-            if abs(data['Close'].iloc[local_min[-1]] - data['Close'].iloc[local_min[-2]]) / data['Close'].iloc[local_min[-2]] < 0.03:
-                patterns.append("Double Bottom")
-        
-        # head and shoulders
-        if len(local_max) >= 3:
-            if data['Close'].iloc[local_max[-2]] > data['Close'].iloc[local_max[-1]] and \
-               data['Close'].iloc[local_max[-2]] > data['Close'].iloc[local_max[-3]] and \
-               abs(data['Close'].iloc[local_max[-1]] - data['Close'].iloc[local_max[-3]]) / data['Close'].iloc[local_max[-3]] < 0.03:
-                patterns.append("Head and Shoulders")
-        
-        # bullish flag
-        if data['Close'].iloc[-1] > data['Close'].iloc[-window] and \
-           all(data['High'].iloc[-i] <= data['High'].iloc[-i-1] for i in range(1, window)):
-            patterns.append("Bullish Flag")
-        
-        # bearish flag
-        if data['Close'].iloc[-1] < data['Close'].iloc[-window] and \
-           all(data['Low'].iloc[-i] >= data['Low'].iloc[-i-1] for i in range(1, window)):
-            patterns.append("Bearish Flag")
-        
-        return patterns
 
     def update_technical_analysis(self, ticker, expiration_date):
         try:
@@ -810,9 +803,9 @@ class EnhancedOptionChainAnalyzer:
         lower_bb = data['Lower_BB'].iloc[-1]
         sma20 = data['SMA20'].iloc[-1]
         sma50 = data['SMA50'].iloc[-1]
-
+    
         analysis = f"Technical Analysis for {self.ticker_entry.get().upper()}:\n\n"
-
+    
         if last_close > sma20 > sma50:
             analysis += "Price Trend: Bullish. The stock is trading above both the 20-day and 50-day SMAs.\n"
         elif sma20 > sma50 and last_close > sma50:
@@ -821,28 +814,28 @@ class EnhancedOptionChainAnalyzer:
             analysis += "Price Trend: Bearish. The stock is trading below both the 20-day and 50-day SMAs.\n"
         else:
             analysis += "Price Trend: Mixed. The stock is showing conflicting signals relative to its moving averages.\n"
-
+    
         if last_volume > avg_volume * 1.5:
             analysis += "Volume: Significantly higher than average. This could indicate strong interest in the stock.\n"
         elif last_volume < avg_volume * 0.5:
             analysis += "Volume: Significantly lower than average. This could indicate lack of interest or uncertainty.\n"
         else:
             analysis += "Volume: Around average levels.\n"
-
+    
         if rsi > 70:
             analysis += f"RSI: Overbought ({rsi:.2f} > 70). The stock might be due for a pullback.\n"
         elif rsi < 30:
             analysis += f"RSI: Oversold ({rsi:.2f} < 30). The stock might be due for a bounce.\n"
         else:
             analysis += f"RSI: Neutral ({rsi:.2f}). Neither overbought nor oversold.\n"
-
+    
         if last_close > upper_bb:
             analysis += "Bollinger Bands: Price is above the upper band. This could indicate overbought conditions or strong upward momentum.\n"
         elif last_close < lower_bb:
             analysis += "Bollinger Bands: Price is below the lower band. This could indicate oversold conditions or strong downward momentum.\n"
         else:
             analysis += "Bollinger Bands: Price is within the bands, indicating relatively normal trading conditions.\n"
-
+    
         support_levels, resistance_levels = self.calculate_support_resistance(data)
         if support_levels:
             latest_support = support_levels[-1][1]
@@ -850,7 +843,7 @@ class EnhancedOptionChainAnalyzer:
         if resistance_levels:
             latest_resistance = resistance_levels[-1][1]
             analysis += f"Nearest Resistance Level: ${latest_resistance:.2f}\n"
-
+    
         if support_levels and resistance_levels:
             if last_close < latest_support:
                 analysis += "Price is currently below the nearest support level. Watch for a potential bounce or a breakdown.\n"
@@ -858,7 +851,7 @@ class EnhancedOptionChainAnalyzer:
                 analysis += "Price is currently above the nearest resistance level. Watch for a potential pullback or a breakout.\n"
             else:
                 analysis += "Price is between support and resistance levels. Watch for a potential breakout in either direction.\n"
-
+    
         patterns = self.detect_patterns(data)
         if patterns:
             analysis += "\nDetected Chart Patterns:\n"
@@ -877,7 +870,7 @@ class EnhancedOptionChainAnalyzer:
                 analysis += "- Bearish Flag: This continuation pattern indicates the current downtrend may persist. Watch for potential breakdowns.\n"
         else:
             analysis += "\nNo clear chart patterns detected in the recent price action.\n"
-
+    
         analysis += "\nSuggestion: "
         if (last_close > sma20 > sma50 and rsi < 70) or (last_close < lower_bb and rsi < 30) or "Double Bottom" in patterns or "Bullish Flag" in patterns:
             analysis += "Consider bullish strategies. The stock shows positive momentum, but monitor for potential reversal signals.\n"
@@ -885,9 +878,9 @@ class EnhancedOptionChainAnalyzer:
             analysis += "Consider bearish strategies. The stock shows negative momentum, but monitor for potential reversal signals.\n"
         else:
             analysis += "The stock shows mixed signals. Consider neutral strategies or wait for clearer directional indications.\n"
-
+    
         analysis += "\nNote: This analysis is based on technical indicators only. Always consider fundamental factors and overall market conditions before making investment decisions."
-
+    
         return analysis
 
     def update_analysis_text(self, analysis):
@@ -898,6 +891,7 @@ class EnhancedOptionChainAnalyzer:
         self.chart_ax.clear()
         
         self.chart_ax.plot(data.index, data['Close'], label='Close Price', color='blue')
+        
         self.chart_ax.plot(data.index, data['SMA20'], label='20-day SMA', color='orange', alpha=0.7)
         self.chart_ax.plot(data.index, data['SMA50'], label='50-day SMA', color='red', alpha=0.7)
         
@@ -924,28 +918,30 @@ class EnhancedOptionChainAnalyzer:
                             color='blue', fontweight='bold')
         
         ax2.annotate(f'Volume: {last_volume:,.0f}', 
-                     xy=(last_date, last_volume), 
-                     xytext=(5, 5), textcoords='offset points', 
-                     color='darkblue', fontweight='bold')
+                    xy=(last_date, last_volume), 
+                    xytext=(5, 5), textcoords='offset points', 
+                    color='darkblue', fontweight='bold')
         
         patterns = self.detect_patterns(data)
         if patterns:
             pattern_text = "Detected Patterns: " + ", ".join(patterns)
             self.chart_ax.text(0.05, 0.95, pattern_text, transform=self.chart_ax.transAxes, 
-                               verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+                            verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
         
         self.chart_ax.set_title(f'Technical Analysis for {ticker} (Expiration: {expiration_date})')
         self.chart_ax.set_xlabel('Date')
         self.chart_ax.set_ylabel('Price')
+        
         self.chart_ax.legend(loc='upper left')
         ax2.legend(loc='upper right')
+        
         self.chart_ax.grid(True, alpha=0.3)
         
         plt.setp(self.chart_ax.get_xticklabels(), rotation=45, ha='right')
         
         self.chart_fig.tight_layout()
         self.chart_canvas.draw()
-        
+
     def detect_trend(self, data, window=20):
         short_ma = data['Close'].rolling(window=window).mean()
         long_ma = data['Close'].rolling(window=window*2).mean()
@@ -995,7 +991,7 @@ class EnhancedOptionChainAnalyzer:
             analysis += "Price is below the lower Bollinger Band, suggesting potential oversold conditions.\n"
         
         return analysis
-        
+
     def generate_comprehensive_analysis(self, ticker, expiry):
         if not hasattr(self, 'data') or self.data.empty:
             self.prepare_data(ticker, expiry)
@@ -1008,7 +1004,6 @@ class EnhancedOptionChainAnalyzer:
         volatility = self.quant_analyzer.calculate_volatility(self.data)
         
         astrological_analysis = self.perform_astrological_analysis(ticker)
-        
         
         summary = f"""
 Comprehensive Analysis for {ticker}:
@@ -1048,6 +1043,99 @@ Long-term Investment Outlook:
 
 """
         return summary
+
+    def perform_astrological_analysis(self, ticker):
+        analysis = "🔮 Astrological Analysis 🔮\n\n"     
+
+        date = datetime.now()
+        
+        sun = ephem.Sun()
+        moon = ephem.Moon()
+        
+        sun.compute(date)
+        moon.compute(date)
+        
+        moon_phase = moon.phase
+        if moon_phase < 5:
+            analysis += "New Moon: A time for new beginnings. The stock may start a new trend.\n"
+        elif moon_phase < 95:
+            analysis += "Waxing Moon: Growth phase. The stock might see some gains.\n"
+        elif moon_phase < 100:
+            analysis += "Full Moon: Peak energy. Expect high volatility.\n"
+        else:
+            analysis += "Waning Moon: A time for reflection. The stock might consolidate.\n"
+        
+        sun_sign = ephem.constellation(sun)[1]
+        analysis += f"The Sun is in {sun_sign}. "
+        if sun_sign in ["Aries", "Leo", "Sagittarius"]:
+            analysis += "Fire signs suggest passion and growth. The stock might heat up!\n"
+        elif sun_sign in ["Taurus", "Virgo", "Capricorn"]:
+            analysis += "Earth signs suggest stability. The stock might show steady performance.\n"
+        elif sun_sign in ["Gemini", "Libra", "Aquarius"]:
+            analysis += "Air signs suggest communication and ideas. News might affect the stock.\n"
+        else:
+            analysis += "Water signs suggest emotion and intuition. Trust your gut feeling about this stock.\n"
+        
+        events = [
+            "Mercury is in retrograde. Communication might be tricky. Double-check your orders!",
+            "Venus aligns with Mars. Love and war collide. The stock might see a passionate battle between bulls and bears.",
+            "Jupiter's influence is strong. Expansion and growth might be on the horizon.",
+            "Saturn's rings are particularly bright. Patience may be rewarded in the long term.",
+            "Uranus is causing disruptions. Expect the unexpected with this stock!",
+            "Neptune's dreamy influence is strong. The stock's true value might be obscured.",
+            "Pluto's transformative energy is at play. A major change could be coming."
+        ]
+        analysis += random.choice(events) + "\n\n"
+        
+        change_percent = random.uniform(-5, 5)
+        direction = "rise" if change_percent > 0 else "fall"
+        analysis += f"The stars suggest the stock price may {direction} by about {abs(change_percent):.2f}% in the next lunar cycle.\n"
+        
+        advice = [
+            "Consider meditation before making any trades.",
+            "Consult your horoscope before major investment decisions.",
+            "Aligning your chakras might improve your trading performance.",
+            "Remember, the universe has a plan... but it might not be about your stock picks.",
+            "If in doubt, consult a magic 8-ball for your investment strategy."
+        ]
+        analysis += f"\nCelestial Advice: {random.choice(advice)}\n"
+        
+        return analysis
+
+    def detect_patterns(self, data, window=20):
+        patterns = []
+        
+        local_max = argrelextrema(data['Close'].values, np.greater, order=window)[0]
+        local_min = argrelextrema(data['Close'].values, np.less, order=window)[0]
+        
+        # double top
+        if len(local_max) >= 2:
+            if abs(data['Close'].iloc[local_max[-1]] - data['Close'].iloc[local_max[-2]]) / data['Close'].iloc[local_max[-2]] < 0.03:
+                patterns.append("Double Top")
+        
+        # double bottom
+        if len(local_min) >= 2:
+            if abs(data['Close'].iloc[local_min[-1]] - data['Close'].iloc[local_min[-2]]) / data['Close'].iloc[local_min[-2]] < 0.03:
+                patterns.append("Double Bottom")
+        
+        # head and shoulders
+        if len(local_max) >= 3:
+            if data['Close'].iloc[local_max[-2]] > data['Close'].iloc[local_max[-1]] and \
+               data['Close'].iloc[local_max[-2]] > data['Close'].iloc[local_max[-3]] and \
+               abs(data['Close'].iloc[local_max[-1]] - data['Close'].iloc[local_max[-3]]) / data['Close'].iloc[local_max[-3]] < 0.03:
+                patterns.append("Head and Shoulders")
+        
+        # bullish flag
+        if data['Close'].iloc[-1] > data['Close'].iloc[-window] and \
+           all(data['High'].iloc[-i] <= data['High'].iloc[-i-1] for i in range(1, window)):
+            patterns.append("Bullish Flag")
+        
+        # bearish flag
+        if data['Close'].iloc[-1] < data['Close'].iloc[-window] and \
+           all(data['Low'].iloc[-i] >= data['Low'].iloc[-i-1] for i in range(1, window)):
+            patterns.append("Bearish Flag")
+        
+        return patterns
 
 if __name__ == "__main__":
     root = tk.Tk()
