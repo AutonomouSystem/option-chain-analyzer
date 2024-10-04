@@ -438,12 +438,23 @@ class EnhancedOptionChainAnalyzer:
         ttk.Label(self.income_frame, text="Number of Contracts:").pack(pady=5)
         self.num_contracts_entry = ttk.Entry(self.income_frame)
         self.num_contracts_entry.pack(pady=5)
-        self.num_contracts_entry.insert(0, "1")  
+        self.num_contracts_entry.insert(0, "1") 
+        
+        ttk.Label(self.income_frame, text="Delta Range:").pack(pady=5)
+        self.delta_slider = ttk.Scale(self.income_frame, from_=0.1, to=0.5, orient='horizontal', length=200, value=0.2)
+        self.delta_slider.pack(pady=5)
+        self.delta_value_label = ttk.Label(self.income_frame, text="0.20")
+        self.delta_value_label.pack(pady=5)
+        self.delta_slider.bind("<Motion>", self.update_delta_label)
         
         ttk.Button(self.income_frame, text="Estimate Income", command=self.calculate_income_estimate).pack(pady=10)
         
         self.income_result_text = tk.Text(self.income_frame, wrap=tk.WORD, width=80, height=20)
         self.income_result_text.pack(padx=10, pady=10, expand=True, fill="both")
+        
+    def update_delta_label(self, event):
+        value = round(self.delta_slider.get(), 2)
+        self.delta_value_label.config(text=f"{value:.2f}")    
         
     def estimate_income(self, option_chain, num_contracts, expiration_date, lower_delta=0.20, upper_delta=0.30):
         if 'Delta' not in option_chain.columns:
@@ -477,6 +488,7 @@ class EnhancedOptionChainAnalyzer:
     def calculate_income_estimate(self):
         ticker = self.ticker_entry.get().upper()
         expiry = self.expiry_var.get()
+        delta_value = round(self.delta_slider.get(), 2)
         
         if not ticker or not expiry:
             messagebox.showerror("Error", "Please enter a ticker symbol and select an expiration date")
@@ -495,13 +507,12 @@ class EnhancedOptionChainAnalyzer:
             all_options = pd.concat([chain.calls, chain.puts])
             all_options['Type'] = ['Call'] * len(chain.calls) + ['Put'] * len(chain.puts)
             
-            income_estimate = self.estimate_income_scenarios(all_options, max_contracts, expiry)
+            income_estimate = self.estimate_income_scenarios(ticker, all_options, max_contracts, expiry, delta_value)
             
             self.income_result_text.delete(1.0, tk.END)
             self.income_result_text.insert(tk.END, income_estimate)
         except Exception as e:
             messagebox.showerror("Error", f"An error occurred: {str(e)}")
-    
     
     def calculate_delta(self, row, current_price, expiration_date, risk_free_rate=0.02):
         S = current_price
@@ -517,7 +528,10 @@ class EnhancedOptionChainAnalyzer:
         else:  
             return -norm.cdf(-d1)  
         
-    def estimate_income_scenarios(self, option_chain, max_contracts, expiration_date, lower_delta=0.20, upper_delta=0.30):
+    def estimate_income_scenarios(self, ticker, option_chain, max_contracts, expiration_date, delta_value):
+        lower_delta = max(0.1, delta_value - 0.05)
+        upper_delta = min(0.5, delta_value + 0.05)
+        
         if 'Delta' not in option_chain.columns:
             current_price = option_chain['lastPrice'].iloc[0] + option_chain['strike'].iloc[0]
             option_chain['Delta'] = option_chain.apply(lambda row: self.calculate_delta(row, current_price, expiration_date), axis=1)
@@ -536,16 +550,34 @@ class EnhancedOptionChainAnalyzer:
         call_premium = filtered_calls['lastPrice'].sum() * 100
         put_premium = filtered_puts['lastPrice'].sum() * 100
         
+        # Determine if options are weekly or monthly
+        today = pd.Timestamp.now()
+        expiry = pd.to_datetime(expiration_date)
+        days_to_expiry = (expiry - today).days
+        is_monthly = days_to_expiry > 25  # Assume monthly if more than 25 days to expiry
+        
+        frequency = "Monthly" if is_monthly else "Weekly"
+        multiplier = 1 if is_monthly else 4  # For monthly options, we don't multiply
+        
         scenarios = {
             f"{max_contracts} Calls": call_premium * max_contracts,
             f"{max_contracts} Puts": put_premium * max_contracts,
             f"{max_contracts//2} Calls + {max_contracts//2} Puts": (call_premium * (max_contracts//2)) + (put_premium * (max_contracts//2))
         }
         
-        result = "Estimated Weekly Income Scenarios:\n\n"
+        result = f"Estimated {frequency} Income Scenarios for {ticker}:\n\n"
         for scenario, income in scenarios.items():
             result += f"{scenario}: ${income:.2f}\n"
-            result += f"    Monthly (x4): ${income * 4:.2f}\n\n"
+            if not is_monthly:
+                result += f"    Monthly (x4): ${income * multiplier:.2f}\n"
+            result += "\n"
+        
+        if is_monthly:
+            result += "Note: These are monthly options. The income shown is already on a monthly basis.\n\n"
+        else:
+            result += "Note: These are weekly options. Monthly estimate assumes 4 successful trades per month.\n\n"
+        
+        result += f"Delta Range: {lower_delta:.2f} - {upper_delta:.2f}\n\n"
         
         result += "Options used for calculation:\n"
         result += "Calls:\n"
