@@ -357,6 +357,7 @@ class EnhancedOptionChainAnalyzer:
         self.setup_fundamental_frame()
         self.setup_quant_frame()
         self.setup_summary_frame()
+        self.setup_income_estimator_frame()        
 
         self.fundamental_analyzer = FundamentalAnalyzer()
         self.quant_analyzer = QuantAnalyzer()
@@ -429,6 +430,130 @@ class EnhancedOptionChainAnalyzer:
             tv.move(k, '', index)
         
         tv.heading(col, command=lambda: self.treeview_sort_column(tv, col, not reverse))
+    
+    def setup_income_estimator_frame(self):
+        self.income_frame = ttk.Frame(self.notebook)
+        self.notebook.add(self.income_frame, text="Income Estimator")
+        
+        ttk.Label(self.income_frame, text="Number of Contracts:").pack(pady=5)
+        self.num_contracts_entry = ttk.Entry(self.income_frame)
+        self.num_contracts_entry.pack(pady=5)
+        self.num_contracts_entry.insert(0, "1")  
+        
+        ttk.Button(self.income_frame, text="Estimate Income", command=self.calculate_income_estimate).pack(pady=10)
+        
+        self.income_result_text = tk.Text(self.income_frame, wrap=tk.WORD, width=80, height=20)
+        self.income_result_text.pack(padx=10, pady=10, expand=True, fill="both")
+        
+    def estimate_income(self, option_chain, num_contracts, expiration_date, lower_delta=0.20, upper_delta=0.30):
+        if 'Delta' not in option_chain.columns:
+            current_price = option_chain['lastPrice'].iloc[0] + option_chain['strike'].iloc[0]  # Approximate current price
+            option_chain['Delta'] = option_chain.apply(lambda row: self.calculate_delta(row, current_price, expiration_date), axis=1)
+        
+        filtered_options = option_chain[
+            ((option_chain['Type'] == 'Call') & (option_chain['Delta'] >= lower_delta) & (option_chain['Delta'] <= upper_delta)) |
+            ((option_chain['Type'] == 'Put') & (option_chain['Delta'].abs() >= lower_delta) & (option_chain['Delta'].abs() <= upper_delta))
+        ]
+        
+        if filtered_options.empty:
+            return "No options found within the specified delta range."
+        
+        call_income = filtered_options[filtered_options['Type'] == 'Call']['lastPrice'].sum() * 100 * num_contracts
+        put_income = filtered_options[filtered_options['Type'] == 'Put']['lastPrice'].sum() * 100 * num_contracts
+        
+        weekly_income = call_income + put_income
+        monthly_income = weekly_income * 4  # assuming 4 weeks in a month
+        
+        result = f"Estimated Income (based on {num_contracts} contracts):\n"
+        result += f"Weekly Income: ${weekly_income:.2f}\n"
+        result += f"Monthly Income: ${monthly_income:.2f}\n"
+        result += f"\nCall Options Income: ${call_income:.2f}\n"
+        result += f"Put Options Income: ${put_income:.2f}\n"
+        result += f"\nOptions used for calculation:\n"
+        result += filtered_options[['Type', 'strike', 'lastPrice', 'Delta']].to_string(index=False)
+        
+        return result
+    
+    def calculate_income_estimate(self):
+        ticker = self.ticker_entry.get().upper()
+        expiry = self.expiry_var.get()
+        
+        if not ticker or not expiry:
+            messagebox.showerror("Error", "Please enter a ticker symbol and select an expiration date")
+            return
+        
+        try:
+            max_contracts = int(self.num_contracts_entry.get())
+        except ValueError:
+            messagebox.showerror("Error", "Please enter a valid number of contracts")
+            return
+        
+        try:
+            stock = yf.Ticker(ticker)
+            chain = stock.option_chain(expiry)
+            
+            all_options = pd.concat([chain.calls, chain.puts])
+            all_options['Type'] = ['Call'] * len(chain.calls) + ['Put'] * len(chain.puts)
+            
+            income_estimate = self.estimate_income_scenarios(all_options, max_contracts, expiry)
+            
+            self.income_result_text.delete(1.0, tk.END)
+            self.income_result_text.insert(tk.END, income_estimate)
+        except Exception as e:
+            messagebox.showerror("Error", f"An error occurred: {str(e)}")
+    
+    
+    def calculate_delta(self, row, current_price, expiration_date, risk_free_rate=0.02):
+        S = current_price
+        K = row['strike']
+        T = (pd.to_datetime(expiration_date) - pd.Timestamp.now()).days / 365
+        r = risk_free_rate
+        sigma = row['impliedVolatility']
+        
+        d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
+        
+        if row['Type'] == 'Call':
+            return norm.cdf(d1)
+        else:  
+            return -norm.cdf(-d1)  
+        
+    def estimate_income_scenarios(self, option_chain, max_contracts, expiration_date, lower_delta=0.20, upper_delta=0.30):
+        if 'Delta' not in option_chain.columns:
+            current_price = option_chain['lastPrice'].iloc[0] + option_chain['strike'].iloc[0]
+            option_chain['Delta'] = option_chain.apply(lambda row: self.calculate_delta(row, current_price, expiration_date), axis=1)
+        
+        filtered_calls = option_chain[
+            (option_chain['Type'] == 'Call') & 
+            (option_chain['Delta'] >= lower_delta) & 
+            (option_chain['Delta'] <= upper_delta)
+        ]
+        filtered_puts = option_chain[
+            (option_chain['Type'] == 'Put') & 
+            (option_chain['Delta'].abs() >= lower_delta) & 
+            (option_chain['Delta'].abs() <= upper_delta)
+        ]
+        
+        call_premium = filtered_calls['lastPrice'].sum() * 100
+        put_premium = filtered_puts['lastPrice'].sum() * 100
+        
+        scenarios = {
+            f"{max_contracts} Calls": call_premium * max_contracts,
+            f"{max_contracts} Puts": put_premium * max_contracts,
+            f"{max_contracts//2} Calls + {max_contracts//2} Puts": (call_premium * (max_contracts//2)) + (put_premium * (max_contracts//2))
+        }
+        
+        result = "Estimated Weekly Income Scenarios:\n\n"
+        for scenario, income in scenarios.items():
+            result += f"{scenario}: ${income:.2f}\n"
+            result += f"    Monthly (x4): ${income * 4:.2f}\n\n"
+        
+        result += "Options used for calculation:\n"
+        result += "Calls:\n"
+        result += filtered_calls[['strike', 'lastPrice', 'Delta']].to_string(index=False) + "\n\n"
+        result += "Puts:\n"
+        result += filtered_puts[['strike', 'lastPrice', 'Delta']].to_string(index=False)
+        
+        return result
 
     def use_recent_ticker(self, event):
         selected_ticker = self.recent_tickers_var.get()
@@ -739,6 +864,7 @@ class EnhancedOptionChainAnalyzer:
         threading.Thread(target=self.update_fundamental_analysis, args=(ticker,), daemon=True).start()
         threading.Thread(target=self.update_quant_analysis, args=(ticker,), daemon=True).start()
         threading.Thread(target=self.update_comprehensive_analysis, args=(ticker, expiry), daemon=True).start()
+        threading.Thread(target=self.calculate_income_estimate, daemon=True).start()        
 
     def update_fundamental_analysis(self, ticker):
         analysis = self.perform_fundamental_analysis(ticker)
