@@ -458,7 +458,7 @@ class EnhancedOptionChainAnalyzer:
         
     def estimate_income(self, option_chain, num_contracts, expiration_date, lower_delta=0.20, upper_delta=0.30):
         if 'Delta' not in option_chain.columns:
-            current_price = option_chain['lastPrice'].iloc[0] + option_chain['strike'].iloc[0]  # Approximate current price
+            current_price = option_chain['lastPrice'].iloc[0] + option_chain['strike'].iloc[0] 
             option_chain['Delta'] = option_chain.apply(lambda row: self.calculate_delta(row, current_price, expiration_date), axis=1)
         
         filtered_options = option_chain[
@@ -550,14 +550,13 @@ class EnhancedOptionChainAnalyzer:
         call_premium = filtered_calls['lastPrice'].sum() * 100
         put_premium = filtered_puts['lastPrice'].sum() * 100
         
-        # Determine if options are weekly or monthly
         today = pd.Timestamp.now()
         expiry = pd.to_datetime(expiration_date)
         days_to_expiry = (expiry - today).days
-        is_monthly = days_to_expiry > 25  # Assume monthly if more than 25 days to expiry
+        is_monthly = days_to_expiry > 25 
         
         frequency = "Monthly" if is_monthly else "Weekly"
-        multiplier = 1 if is_monthly else 4  # For monthly options, we don't multiply
+        multiplier = 1 if is_monthly else 4  
         
         scenarios = {
             f"{max_contracts} Calls": call_premium * max_contracts,
@@ -660,14 +659,11 @@ class EnhancedOptionChainAnalyzer:
             put_strikes = all_strikes[max(0, current_price_index - 6):current_price_index + 1]
             puts = puts[puts['strike'].isin(put_strikes)]
 
-            # Calculate days to expiry
             expiry_date = datetime.strptime(expiry, "%Y-%m-%d")
             days_to_expiry = (expiry_date - datetime.now()).days
 
-            # Use a constant risk-free rate (you may want to fetch this dynamically)
             risk_free_rate = 0.02  # 2% annual rate
 
-            # Calculate Greeks for calls and puts
             calls['greeks'] = calls.apply(lambda row: self.calculate_option_greeks(row, current_price, risk_free_rate, days_to_expiry, 'call'), axis=1)
             puts['greeks'] = puts.apply(lambda row: self.calculate_option_greeks(row, current_price, risk_free_rate, days_to_expiry, 'put'), axis=1)
 
@@ -687,7 +683,6 @@ class EnhancedOptionChainAnalyzer:
             self.result_tree.heading(col, text=col, command=lambda _col=col: self.treeview_sort_column(self.result_tree, _col, False))
             self.result_tree.column(col, width=100)
         
-        # Combine calls and puts, and sort by strike price
         all_options = pd.concat([calls, puts])
         all_options['Type'] = ['Call'] * len(calls) + ['Put'] * len(puts)
         all_options_sorted = all_options.sort_values('strike', ascending=False)
